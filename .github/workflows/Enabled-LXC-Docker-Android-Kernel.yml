@@ -47,8 +47,6 @@ jobs:
         patch="${{ inputs.os_patch_level }}"
 
         # 根据 version_name 判断需要 init 哪个分支
-        # 注意：如果 version_name = "android12-5.10.218"，
-        #       依然是 init 到 "common-android12-5.10-<patch>"
         if [[ "$version" == android12-5.10* ]]; then
           branch="common-android12-5.10-$patch"
         elif [[ "$version" == android13-5.15* ]]; then
@@ -72,18 +70,15 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/android-kernel
 
-        echo "Importing Docker kconfig from https://github.com/BI1PBUTHU/android_kernel_docker.git"
+        echo "Cloning Docker kconfig from https://github.com/BI1PBUTHU/android_kernel_docker.git"
 
-        # 将外部仓库的 docker Kconfig 代码合并到本地目录 "docker/"
-        git fetch https://github.com/BI1PBUTHU/android_kernel_docker.git main
-        git merge -s ours --no-commit --allow-unrelated-histories --squash FETCH_HEAD
-        git read-tree --prefix=docker -u FETCH_HEAD
-        git commit -m "Imported docker/ from https://github.com/cyberknight777/android_kernel_docker"
+        # 直接克隆到名为 docker 的子目录
+        git clone https://github.com/BI1PBUTHU/android_kernel_docker.git docker
 
-        # 在 arch/arm64/Kconfig（或你实际的目标架构路径）里加入 source "docker/Kconfig"
+        # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
         echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
 
-        echo "Docker kconfig imported. You may need to enable other configs manually if not using SLMK."
+        echo "Docker kconfig cloned. You may need to enable other configs manually if not using SLMK."
 
     - name: KernelSU
       if: ${{ inputs.kernelsu == true }}
@@ -111,16 +106,14 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/android-kernel
 
-        # 1) 从 version_name 中去掉最后的 ".xxx" 以获取 "android12-5.10" 或 "android13-5.15" 等短版本
-        #    这里使用 sed 的正则来截掉多余部分:
-        #    例如 "android12-5.10.218" => "android12-5.10"
+        # 提取短版本, e.g. "android12-5.10.218" -> "android12-5.10"
         short_version=$(echo "${{ inputs.version_name }}" | sed -E 's/^([^-]+-[0-9]+\.[0-9]+).*/\1/')
         echo "short_version = $short_version"
 
-        # 2) 拼接出 OUTDIR，例如 out/android12-5.10/dist
+        # 拼接出 OUTDIR
         OUTDIR="$GITHUB_WORKSPACE/android-kernel/out/${short_version}/dist"
-        
-        # 如果目录不存在则回退到 out/dist (或你项目的其他默认路径)
+
+        # 如果目录不存在则回退到 out/dist
         if [ ! -d "$OUTDIR" ]; then
           echo "Warning: $OUTDIR doesn't exist. Falling back to $GITHUB_WORKSPACE/android-kernel/out/dist"
           OUTDIR="$GITHUB_WORKSPACE/android-kernel/out/dist"
@@ -133,16 +126,12 @@ jobs:
         # 拷贝内核产物到 output
         cp "$OUTDIR/Image" "$GITHUB_WORKSPACE/output/" || true
         cp "$OUTDIR/Image.lz4" "$GITHUB_WORKSPACE/output/" || true
-
-        # 也拷贝一份到 $GITHUB_WORKSPACE，以便后续打包成 gz
         cp "$OUTDIR/Image" "$GITHUB_WORKSPACE/" || true
 
         # gzip
         cd $GITHUB_WORKSPACE
         if [ -f "Image" ]; then
           gzip -n -k -f -9 Image > Image.gz
-        else
-          echo "No Image found to gzip."
         fi
 
         # 处理 AnyKernel3
@@ -152,8 +141,8 @@ jobs:
           cp "$OUTDIR/Image" ./AnyKernel3/
         fi
 
-        # [可选] 下载官方 boot.img，用于重新打包
-        # 如果你还需要判断 android13/android14，对应下载不同 URL，也可以类似地做 if-else
+        # 下载官方 boot.img 用于重新打包 (此处依然是 android12-5.10)
+        # 如果针对 android13, 14, 等，要再做 if/else 下载不同链接
         wget "https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-${{ inputs.os_patch_level }}_r1.zip" -O ./gki-kernel.zip || true
         unzip -q ./gki-kernel.zip || true
         rm -f ./gki-kernel.zip
@@ -172,13 +161,11 @@ jobs:
         fi
         echo "Using --os_version=$os_version"
 
-        # 拆包官方 boot.img
-        if [ -f "$GITHUB_WORKSPACE/boot.img" ] || ls $GITHUB_WORKSPACE/boot*.img 1>/dev/null 2>&1; then
+        if ls $GITHUB_WORKSPACE/boot*.img 1>/dev/null 2>&1; then
           echo "Unpack official boot"
           ./tools/mkbootimg/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot*.img
         fi
 
-        # 重新打包 boot.img, boot-lz4.img, boot-gz.img
         if [ -f "$OUTDIR/Image" ]; then
           echo "Build boot.img"
           ./tools/mkbootimg/mkbootimg.py \
