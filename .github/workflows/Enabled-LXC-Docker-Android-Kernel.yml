@@ -68,12 +68,12 @@ jobs:
     - name: Apply patches and configuration files
       if: ${{ inputs.custom == true }}
       run: |
-        cd $GITHUB_WORKSPACE/android-kernel
+        cd $GITHUB_WORKSPACE
+        mkdir android-kernel/docker
 
         echo "Cloning Docker kconfig from https://github.com/BI1PBUTHU/android_kernel_docker.git"
 
-        # 直接克隆到名为 docker 的子目录
-        git clone https://github.com/BI1PBUTHU/android_kernel_docker.git docker
+        cp docker/Kconfig android-kernel/docker
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
         echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
