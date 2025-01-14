@@ -75,9 +75,8 @@ jobs:
         cp docker/Kconfig android-kernel/docker
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
+        cd android-kernel
         echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
-
-        echo "Docker kconfig cloned. You may need to enable other configs manually if not using SLMK."
 
     - name: KernelSU
       if: ${{ inputs.kernelsu == true }}
