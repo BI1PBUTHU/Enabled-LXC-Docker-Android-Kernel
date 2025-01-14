@@ -69,10 +69,9 @@ jobs:
       if: ${{ inputs.custom == true }}
       run: |
         cd $GITHUB_WORKSPACE
+        
         mkdir android-kernel/docker
-
-        echo "Cloning Docker kconfig from https://github.com/BI1PBUTHU/android_kernel_docker.git"
-
+        
         cp docker/Kconfig android-kernel/docker
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
