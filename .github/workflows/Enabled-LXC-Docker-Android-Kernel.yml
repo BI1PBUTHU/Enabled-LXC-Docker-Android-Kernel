@@ -7,14 +7,12 @@ on:
         required: true
         type: string
         description: >
-          Patch level of common kernel manifest,
-          e.g. "2024-08"
+          Patch level of common kernel manifest, e.g. "2024-08"
       version_name:
         required: true
         type: string
         description: >
-          Kernel version name,
-          e.g. "android12-5.10.218" or "android13-5.15.123"
+          Kernel version name, e.g. "android12-5.10.218" or "android13-5.15.123"
       custom:
         required: true
         type: boolean
@@ -49,6 +47,8 @@ jobs:
         patch="${{ inputs.os_patch_level }}"
 
         # 根据 version_name 判断需要 init 哪个分支
+        # 注意：如果 version_name = "android12-5.10.218"，
+        #       依然是 init 到 "common-android12-5.10-<patch>"
         if [[ "$version" == android12-5.10* ]]; then
           branch="common-android12-5.10-$patch"
         elif [[ "$version" == android13-5.15* ]]; then
@@ -70,22 +70,20 @@ jobs:
     - name: Apply patches and configuration files
       if: ${{ inputs.custom == true }}
       run: |
-        cd $GITHUB_WORKSPACE
+        cd $GITHUB_WORKSPACE/android-kernel
 
-        # 根据 version_name 判断要使用哪份 defconfig
-        if [[ "${{ inputs.version_name }}" == android12-5.10* ]]; then
-          echo "Detected Android12. Using gki_defconfig-docker-android12-5.10"
-          cp ./config/gki_defconfig-docker-android12-5.10 ./android-kernel/common/arch/arm64/configs/gki_defconfig
-        else
-          echo "Detected Android13 or above. Using matching defconfig..."
-          # 示例：如果 version_name = android13-5.15
-          # 则对应本地文件 "gki_defconfig-docker-android13-5.15"
-          cp "./config/gki_defconfig-docker-${{ inputs.version_name }}" ./android-kernel/common/arch/arm64/configs/gki_defconfig
-        fi
+        echo "Importing Docker kconfig from https://github.com/BI1PBUTHU/android_kernel_docker.git"
 
-        # 如果有需要额外打 patch，可以在此处执行
-        # cd ./android-kernel/common
-        # git apply $GITHUB_WORKSPACE/gki-patch/patchs/*.patch
+        # 将外部仓库的 docker Kconfig 代码合并到本地目录 "docker/"
+        git fetch https://github.com/BI1PBUTHU/android_kernel_docker.git main
+        git merge -s ours --no-commit --allow-unrelated-histories --squash FETCH_HEAD
+        git read-tree --prefix=docker -u FETCH_HEAD
+        git commit -m "Imported docker/ from https://github.com/cyberknight777/android_kernel_docker"
+
+        # 在 arch/arm64/Kconfig（或你实际的目标架构路径）里加入 source "docker/Kconfig"
+        echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
+
+        echo "Docker kconfig imported. You may need to enable other configs manually if not using SLMK."
 
     - name: KernelSU
       if: ${{ inputs.kernelsu == true }}
@@ -111,32 +109,55 @@ jobs:
     - name: Prepare artifacts
       id: prepareArtifacts
       run: |
+        cd $GITHUB_WORKSPACE/android-kernel
+
+        # 1) 从 version_name 中去掉最后的 ".xxx" 以获取 "android12-5.10" 或 "android13-5.15" 等短版本
+        #    这里使用 sed 的正则来截掉多余部分:
+        #    例如 "android12-5.10.218" => "android12-5.10"
+        short_version=$(echo "${{ inputs.version_name }}" | sed -E 's/^([^-]+-[0-9]+\.[0-9]+).*/\1/')
+        echo "short_version = $short_version"
+
+        # 2) 拼接出 OUTDIR，例如 out/android12-5.10/dist
+        OUTDIR="$GITHUB_WORKSPACE/android-kernel/out/${short_version}/dist"
+        
+        # 如果目录不存在则回退到 out/dist (或你项目的其他默认路径)
+        if [ ! -d "$OUTDIR" ]; then
+          echo "Warning: $OUTDIR doesn't exist. Falling back to $GITHUB_WORKSPACE/android-kernel/out/dist"
+          OUTDIR="$GITHUB_WORKSPACE/android-kernel/out/dist"
+        fi
+        echo "Using OUTDIR = $OUTDIR"
+
+        # 在 GITHUB_WORKSPACE 下新建一个 output 目录，用来放置最终产物
+        mkdir -p $GITHUB_WORKSPACE/output
+
+        # 拷贝内核产物到 output
+        cp "$OUTDIR/Image" "$GITHUB_WORKSPACE/output/" || true
+        cp "$OUTDIR/Image.lz4" "$GITHUB_WORKSPACE/output/" || true
+
+        # 也拷贝一份到 $GITHUB_WORKSPACE，以便后续打包成 gz
+        cp "$OUTDIR/Image" "$GITHUB_WORKSPACE/" || true
+
+        # gzip
         cd $GITHUB_WORKSPACE
-        # 如果你每个版本 out 路径不同，需要进一步做判断
-        # 这里示例仍然使用 android12-5.10/dist 作为 OUTDIR
-        # 请根据你项目实际产物输出路径调整
-        OUTDIR="$GITHUB_WORKSPACE/android-kernel/out/android12-5.10/dist"
-        mkdir -p output
-
-        # 拷贝编译产物到 output 目录
-        cp $OUTDIR/Image ./output/
-        cp $OUTDIR/Image.lz4 ./output/
-        cp $OUTDIR/Image ./
-
-        # 生成 Image.gz
-        gzip -n -k -f -9 Image > Image.gz
+        if [ -f "Image" ]; then
+          gzip -n -k -f -9 Image > Image.gz
+        else
+          echo "No Image found to gzip."
+        fi
 
         # 处理 AnyKernel3
         git clone https://github.com/Kernel-SU/AnyKernel3
         rm -rf ./AnyKernel3/.git
-        cp $OUTDIR/Image ./AnyKernel3/
+        if [ -f "$OUTDIR/Image" ]; then
+          cp "$OUTDIR/Image" ./AnyKernel3/
+        fi
 
-        # 下载官方 boot.img 供重新打包
-        wget "https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-${{ inputs.os_patch_level }}_r1.zip" -O ./gki-kernel.zip
-        unzip -q ./gki-kernel.zip
-        rm ./gki-kernel.zip
+        # [可选] 下载官方 boot.img，用于重新打包
+        # 如果你还需要判断 android13/android14，对应下载不同 URL，也可以类似地做 if-else
+        wget "https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-${{ inputs.os_patch_level }}_r1.zip" -O ./gki-kernel.zip || true
+        unzip -q ./gki-kernel.zip || true
+        rm -f ./gki-kernel.zip
 
-        # 进入内核目录以使用官方提供的 unpack/mkbootimg 脚本
         cd $GITHUB_WORKSPACE/android-kernel
 
         # 根据 version_name 动态设置 --os_version
@@ -149,36 +170,47 @@ jobs:
         else
           os_version="12.0.0"
         fi
+        echo "Using --os_version=$os_version"
 
-        echo "Unpack official boot"
-        ./tools/mkbootimg/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot*.img
+        # 拆包官方 boot.img
+        if [ -f "$GITHUB_WORKSPACE/boot.img" ] || ls $GITHUB_WORKSPACE/boot*.img 1>/dev/null 2>&1; then
+          echo "Unpack official boot"
+          ./tools/mkbootimg/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot*.img
+        fi
 
-        echo "Build boot.img"
-        ./tools/mkbootimg/mkbootimg.py \
-          --header_version 4 \
-          --kernel out/android12-5.10/dist/Image \
-          --ramdisk out/ramdisk \
-          --os_version "$os_version" \
-          --os_patch_level "${{ inputs.os_patch_level }}" \
-          -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot.img"
+        # 重新打包 boot.img, boot-lz4.img, boot-gz.img
+        if [ -f "$OUTDIR/Image" ]; then
+          echo "Build boot.img"
+          ./tools/mkbootimg/mkbootimg.py \
+            --header_version 4 \
+            --kernel "$OUTDIR/Image" \
+            --ramdisk out/ramdisk \
+            --os_version "$os_version" \
+            --os_patch_level "${{ inputs.os_patch_level }}" \
+            -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot.img"
+        fi
 
-        echo "Build boot-lz4.img"
-        ./tools/mkbootimg/mkbootimg.py \
-          --header_version 4 \
-          --kernel out/android12-5.10/dist/Image.lz4 \
-          --ramdisk out/ramdisk \
-          --os_version "$os_version" \
-          --os_patch_level "${{ inputs.os_patch_level }}" \
-          -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot-lz4.img"
+        if [ -f "$OUTDIR/Image.lz4" ]; then
+          echo "Build boot-lz4.img"
+          ./tools/mkbootimg/mkbootimg.py \
+            --header_version 4 \
+            --kernel "$OUTDIR/Image.lz4" \
+            --ramdisk out/ramdisk \
+            --os_version "$os_version" \
+            --os_patch_level "${{ inputs.os_patch_level }}" \
+            -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot-lz4.img"
+        fi
 
-        echo "Build boot-gz.img"
-        ./tools/mkbootimg/mkbootimg.py \
-          --header_version 4 \
-          --kernel "$GITHUB_WORKSPACE/Image.gz" \
-          --ramdisk out/ramdisk \
-          --os_version "$os_version" \
-          --os_patch_level "${{ inputs.os_patch_level }}" \
-          -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot-gz.img"
+        if [ -f "$GITHUB_WORKSPACE/Image.gz" ]; then
+          echo "Build boot-gz.img"
+          ./tools/mkbootimg/mkbootimg.py \
+            --header_version 4 \
+            --kernel "$GITHUB_WORKSPACE/Image.gz" \
+            --ramdisk out/ramdisk \
+            --os_version "$os_version" \
+            --os_patch_level "${{ inputs.os_patch_level }}" \
+            -o "$GITHUB_WORKSPACE/output/${{ inputs.version_name }}_${{ inputs.os_patch_level }}-boot-gz.img"
+        fi
 
     - name: Upload Images
       uses: actions/upload-artifact@v4
