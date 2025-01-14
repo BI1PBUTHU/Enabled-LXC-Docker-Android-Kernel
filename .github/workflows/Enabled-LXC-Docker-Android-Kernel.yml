@@ -70,14 +70,15 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE
         
-        mkdir android-kernel/docker
+        mkdir android-kernel/common/docker
         
-        cp docker/Kconfig android-kernel/docker
+        cp docker/Kconfig android-kernel/common/docker
+        ls -a android-kernel/common/docker
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
-        cd android-kernel
-        ls
+        cd android-kernel/common
         echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
+        
 
     - name: KernelSU
       if: ${{ inputs.kernelsu == true }}
