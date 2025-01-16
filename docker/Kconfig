@@ -54,6 +54,8 @@ config DOCKER
 
 	select CGROUP_NET_CLASSID
 
+	select SYSVIPC
+
 	select MD
 
 	select TTY
@@ -82,13 +84,15 @@ config DOCKER
 
 	select UTS_NS
 
+	select USER_NS
+
 	select CGROUP_CPUACCT
 
 	select CGROUP_DEVICE
 
 	select CGROUP_FREEZER
 
-
+	
 
 	select CPUSETS
 
