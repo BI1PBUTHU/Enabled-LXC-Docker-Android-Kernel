@@ -79,7 +79,7 @@ jobs:
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
         cd android-kernel/common
-        echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
+        # echo 'source "docker/Kconfig"' >> arch/arm64/Kconfig
         
 
     - name: KernelSU
