@@ -73,9 +73,8 @@ jobs:
         mkdir android-kernel/common/docker
         
         cp docker/Kconfig android-kernel/common/docker
-        cp net/netfilter/xt_qtaguid.c android-kernel/common/net/netfilter
+
         ls -a android-kernel/common/docker
-        ls -l android-kernel/common/net/netfilter/xt_qtaguid.c
 
         # 在 arch/arm64/Kconfig（或你实际的 arch/<架构>/Kconfig）里增加 source "docker/Kconfig"
         cd android-kernel/common
