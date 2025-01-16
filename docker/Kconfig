@@ -48,6 +48,8 @@ config DOCKER
 
 	select NET_SCHED
 
+	select CGROUPS 
+
 	select CGROUP_NET_PRIO
 
 	select CGROUP_NET_CLASSID
@@ -85,6 +87,8 @@ config DOCKER
 	select CGROUP_DEVICE
 
 	select CGROUP_FREEZER
+
+
 
 	select CPUSETS
 
